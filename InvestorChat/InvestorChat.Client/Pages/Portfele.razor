@@ -1,0 +1,263 @@
+@page "/portfele"
+@using System.Globalization
+@using System.Net.Http.Json
+@inject HttpClient HttpClient
+@inject IJSRuntime JSRuntime
+@inject InvestorChat.Client.Services.AuthService AuthService
+
+<PageTitle>Portfele</PageTitle>
+
+<section class="market-dashboard">
+    <header class="market-header">
+        <div>
+            <p class="eyebrow">MOJE INWESTYCJE</p>
+            <h1>Portfele</h1>
+            <p class="market-subtitle">Importuj pozycje z pliku CSV i przeglądaj zapisane portfele.</p>
+        </div>
+    </header>
+
+    @if (!AuthService.IsAuthenticated)
+    {
+        <div class="watchlist-add-form">
+            <p class="watchlist-hint">Zaloguj się, aby importować i przeglądać swoje portfele.</p>
+            <NavLink class="primary-button" href="/login">Zaloguj się</NavLink>
+        </div>
+    }
+    else
+    {
+        <div class="watchlist-add-form">
+            <label for="portfolio-name">Nazwa portfela</label>
+            <input id="portfolio-name" class="form-control" @bind="portfolioName" maxlength="100" placeholder="np. Portfel długoterminowy" />
+            <label for="portfolio-file" class="mt-3">Plik CSV (.csv)</label>
+            <InputFile id="portfolio-file" class="form-control" OnChange="HandleFileChange" accept=".csv,text/csv" />
+            @if (selectedFile is not null)
+            {
+                <p class="watchlist-hint">Wybrano: @selectedFile.Name</p>
+            }
+            @if (!string.IsNullOrWhiteSpace(errorMessage))
+            {
+                <p class="watchlist-error" role="alert">@errorMessage</p>
+            }
+            @if (!string.IsNullOrWhiteSpace(successMessage))
+            {
+                <p class="watchlist-hint" role="status">@successMessage</p>
+            }
+            <button class="primary-button mt-3" @onclick="ImportAsync" disabled="@(isUploading || isLoading)">
+                @(isUploading ? "Importuję..." : "Importuj portfel")
+            </button>
+            <p class="watchlist-hint">Wymagane kolumny: Papier, Giełda, Liczba dostępna (Blokady), Kurs, Waluta, Wartość, Waluta. Obsługiwany separator: średnik, przecinek lub tabulator. Przy ponownym imporcie tej samej nazwy pozycje zostaną zastąpione.</p>
+        </div>
+
+        @if (isLoading)
+        {
+            <p class="dividend-loading">Pobieram portfele...</p>
+        }
+        else if (portfolios.Count == 0)
+        {
+            <p class="dividend-empty">Nie masz jeszcze portfeli. Zaimportuj plik CSV, aby dodać pierwszy.</p>
+        }
+        else
+        {
+            @foreach (var portfolio in portfolios)
+            {
+                <div class="market-toolbar">
+                    <strong>@portfolio.Name</strong>
+                    <span>@portfolio.Positions.Count pozycji</span>
+                    <button class="primary-button" @onclick="() => DeletePortfolioAsync(portfolio)">Usuń portfel</button>
+                </div>
+                <div class="summary-table-wrap">
+                    <table class="summary-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Papier</th>
+                                <th scope="col">Giełda</th>
+                                <th scope="col">Liczba dostępna</th>
+                                <th scope="col">Blokady</th>
+                                <th scope="col">Kurs</th>
+                                <th scope="col">Waluta kursu</th>
+                                <th scope="col">Wartość</th>
+                                <th scope="col">Waluta wartości</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var position in portfolio.Positions)
+                            {
+                                <tr>
+                                    <th scope="row">@position.SecurityName</th>
+                                    <td>@position.Exchange</td>
+                                    <td>@FormatNumber(position.AvailableQuantity)</td>
+                                    <td>@FormatNumber(position.BlockedQuantity)</td>
+                                    <td>@FormatNumber(position.Price)</td>
+                                    <td>@position.PriceCurrency</td>
+                                    <td>@FormatNumber(position.Value)</td>
+                                    <td>@position.ValueCurrency</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+    }
+</section>
+
+@code {
+    private const long MaximumFileSize = 5 * 1024 * 1024;
+    private readonly List<PortfolioResponse> portfolios = [];
+    private string portfolioName = string.Empty;
+    private IBrowserFile? selectedFile;
+    private bool isLoading = true;
+    private bool isUploading;
+    private string? errorMessage;
+    private string? successMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AuthService.InitializeAsync();
+        if (!AuthService.IsAuthenticated)
+        {
+            isLoading = false;
+            return;
+        }
+
+        try
+        {
+            var result = await HttpClient.GetFromJsonAsync<PortfolioResponse[]>("api/portfolios");
+            if (result is not null)
+            {
+                portfolios.AddRange(result);
+            }
+        }
+        catch (HttpRequestException)
+        {
+            errorMessage = "Nie udało się pobrać portfeli. Sprawdź połączenie z serwerem i spróbuj ponownie.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void HandleFileChange(InputFileChangeEventArgs args)
+    {
+        selectedFile = args.File;
+        errorMessage = null;
+        successMessage = null;
+    }
+
+    private async Task DeletePortfolioAsync(PortfolioResponse portfolio)
+    {
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", $"Czy na pewno usunąć portfel „{portfolio.Name}” wraz ze wszystkimi pozycjami?"))
+        {
+            return;
+        }
+
+        errorMessage = null;
+        successMessage = null;
+        try
+        {
+            using var response = await HttpClient.DeleteAsync($"api/portfolios/{portfolio.Id}");
+            if (response.IsSuccessStatusCode)
+            {
+                portfolios.Remove(portfolio);
+                successMessage = $"Usunięto portfel „{portfolio.Name}”.";
+            }
+            else
+            {
+                errorMessage = response.StatusCode == System.Net.HttpStatusCode.NotFound
+                    ? "Portfel nie istnieje lub został już usunięty. Odśwież listę portfeli."
+                    : "Nie udało się usunąć portfela. Spróbuj ponownie.";
+            }
+        }
+        catch (HttpRequestException)
+        {
+            errorMessage = "Nie udało się połączyć z serwerem. Spróbuj ponownie.";
+        }
+    }
+
+    private async Task ImportAsync()
+    {
+        errorMessage = null;
+        successMessage = null;
+        if (string.IsNullOrWhiteSpace(portfolioName))
+        {
+            errorMessage = "Wpisz nazwę portfela.";
+            return;
+        }
+
+        if (selectedFile is null)
+        {
+            errorMessage = "Wybierz plik .csv.";
+            return;
+        }
+
+        isUploading = true;
+        try
+        {
+            using var content = new MultipartFormDataContent();
+            content.Add(new StringContent(portfolioName.Trim()), "name");
+            await using var fileStream = selectedFile.OpenReadStream(MaximumFileSize);
+            using var fileContent = new StreamContent(fileStream);
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
+                "text/csv");
+            content.Add(fileContent, "file", selectedFile.Name);
+
+            using var response = await HttpClient.PostAsync("api/portfolios/import", content);
+            if (!response.IsSuccessStatusCode)
+            {
+                var apiError = await response.Content.ReadFromJsonAsync<ApiError>();
+                errorMessage = apiError?.Message ?? "Nie udało się zaimportować portfela.";
+                return;
+            }
+
+            var imported = await response.Content.ReadFromJsonAsync<PortfolioResponse>();
+            if (imported is null)
+            {
+                errorMessage = "Serwer nie zwrócił zaimportowanego portfela.";
+                return;
+            }
+
+            var existingIndex = portfolios.FindIndex(portfolio => portfolio.Id == imported.Id);
+            if (existingIndex >= 0)
+            {
+                portfolios[existingIndex] = imported;
+            }
+            else
+            {
+                portfolios.Add(imported);
+            }
+
+            portfolios.Sort((left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.Name, right.Name));
+            successMessage = $"Zaimportowano portfel „{imported.Name}” ({imported.Positions.Count} pozycji).";
+        }
+        catch (IOException)
+        {
+            errorMessage = "Plik jest większy niż 5 MB lub nie można go odczytać.";
+        }
+        catch (HttpRequestException)
+        {
+            errorMessage = "Nie udało się połączyć z serwerem. Spróbuj ponownie.";
+        }
+        finally
+        {
+            isUploading = false;
+        }
+    }
+
+    private static string FormatNumber(decimal value) =>
+        value.ToString("N2", CultureInfo.GetCultureInfo("pl-PL"));
+
+    private sealed record PortfolioResponse(int Id, string Name, IReadOnlyList<PortfolioPositionResponse> Positions);
+
+    private sealed record PortfolioPositionResponse(
+        string SecurityName,
+        string Exchange,
+        decimal AvailableQuantity,
+        decimal BlockedQuantity,
+        decimal Price,
+        string PriceCurrency,
+        decimal Value,
+        string ValueCurrency);
+
+    private sealed record ApiError(string Message);
+}

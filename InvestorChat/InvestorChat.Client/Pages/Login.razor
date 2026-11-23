@@ -56,8 +56,9 @@ else
     private string errorMessage = string.Empty;
     private bool isBusy;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
+        await AuthService.InitializeAsync();
         if (AuthService.IsAuthenticated)
         {
             NavigationManager.NavigateTo("/chat");
@@ -69,9 +70,9 @@ else
         NavigationManager.NavigateTo("/chat");
     }
 
-    private void Logout()
+    private async Task Logout()
     {
-        AuthService.Logout();
+        await AuthService.LogoutAsync();
         NavigationManager.NavigateTo("/login");
     }
 
@@ -114,9 +115,9 @@ else
             return;
         }
 
-        if (password.Length < 6)
+        if (password.Length < 8)
         {
-            errorMessage = "Hasło musi mieć co najmniej 6 znaków.";
+            errorMessage = "Hasło musi mieć co najmniej 8 znaków.";
             return;
         }
 

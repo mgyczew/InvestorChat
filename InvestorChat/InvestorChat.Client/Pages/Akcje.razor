@@ -1,6 +1,11 @@
 @page "/akcje"
-@using Microsoft.AspNetCore.SignalR.Client
+@page "/akcje/wig20"
+@using System.Globalization
+@using System.Net.Http.Json
 @using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.SignalR.Client
+@inject HttpClient HttpClient
+@inject InvestorChat.Client.Services.AuthService AuthService
 @inject NavigationManager NavigationManager
 @implements IAsyncDisposable
 
@@ -10,14 +15,84 @@
     <header class="market-header">
         <div>
             <p class="eyebrow">RYNEK WARSZAWSKI</p>
-            <h1>Akcje na żywo</h1>
-            <p class="market-subtitle">Notowania aktualizują się automatycznie co kilka sekund.</p>
+            <h1>@(IsWig20Page ? "WIG20" : "Akcje na żywo")</h1>
+            <p class="market-subtitle">@(IsWig20Page ? "Notowania spółek z indeksu WIG20." : "Dodaj spółki GPW do obserwowanych i sprawdź ich dywidendy.")</p>
         </div>
         <div class="market-status @(isConnected ? "is-live" : "is-offline")">
             <span class="status-dot"></span>
             @(isConnected ? "NA ŻYWO" : "ŁĄCZENIE...")
         </div>
     </header>
+
+    @if (showPortfolios && !IsWig20Page)
+    {
+        <div class="market-toolbar">
+            <span><strong>@portfolios.Sum(portfolio => portfolio.Positions.Count)</strong> pozycji w portfelach</span>
+            <NavLink class="primary-button" href="/akcje/podsumowanie">Podsumowanie</NavLink>
+        </div>
+        @foreach (var portfolio in portfolios)
+        {
+            <div class="market-toolbar">
+                <strong>@portfolio.Name</strong>
+                <span>@portfolio.Positions.Count pozycji</span>
+            </div>
+            <div class="summary-table-wrap">
+                <table class="summary-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Papier</th>
+                            <th scope="col">Giełda</th>
+                            <th scope="col">Liczba dostępna</th>
+                            <th scope="col">Blokady</th>
+                            <th scope="col">Kurs</th>
+                            <th scope="col">Waluta kursu</th>
+                            <th scope="col">Wartość</th>
+                            <th scope="col">Waluta wartości</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var position in portfolio.Positions)
+                        {
+                            <tr>
+                                <th scope="row">@position.SecurityName</th>
+                                <td>@position.Exchange</td>
+                                <td>@FormatNumber(position.AvailableQuantity)</td>
+                                <td>@FormatNumber(position.BlockedQuantity)</td>
+                                <td>@FormatNumber(position.Price)</td>
+                                <td>@position.PriceCurrency</td>
+                                <td>@FormatNumber(position.Value)</td>
+                                <td>@position.ValueCurrency</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+    else if (AuthService.IsAuthenticated && !IsWig20Page)
+    {
+        <div class="watchlist-add-form">
+            <label for="ticker-input">Dodaj spółkę</label>
+            <div class="ticker-input-row">
+                <input id="ticker-input" @bind="tickerInput" @bind:event="oninput" @onkeydown="HandleTickerKeyDown" placeholder="Wpisz ticker GPW, np. CDR" maxlength="15" />
+                <button class="primary-button" @onclick="AddTickerAsync" disabled="@isAdding">
+                    @(isAdding ? "Sprawdzam..." : "Dodaj do obserwowanych")
+                </button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(addError))
+            {
+                <p class="watchlist-error" role="alert">@addError</p>
+            }
+            <p class="watchlist-hint">Wpisz symbol spółki. Zostanie dodana po potwierdzeniu dostępności notowań.</p>
+        </div>
+    }
+    else if (!AuthService.IsAuthenticated)
+    {
+        <div class="watchlist-add-form">
+            <p class="watchlist-hint">Lista gościa pokazuje WIG20. Zaloguj się, aby zarządzać własną watchlistą i zapisywać ją na koncie.</p>
+            <NavLink class="primary-button" href="/login">Zaloguj się</NavLink>
+        </div>
+    }
 
     <div class="market-toolbar">
         <span><strong>@quotes.Count</strong> obserwowanych spółek</span>
@@ -27,7 +102,17 @@
     <div class="market-grid">
         @foreach (var q in quotes)
         {
-            <article class="quote-card @(q.Change >= 0 ? "quote-up" : "quote-down")">
+            <article class="quote-card quote-selectable @(q.Change >= 0 ? "quote-up" : "quote-down")"
+                     role="button"
+                     tabindex="0"
+                     aria-label="Szczegóły spółki @q.Symbol, kurs @q.Price.ToString("0.00") PLN"
+                     @onclick="() => OpenDividendAsync(q)"
+                     @onkeydown="args => HandleQuoteKeyDown(args, q)">
+                @if (AuthService.IsAuthenticated && !IsWig20Page)
+                {
+                    <button class="quote-remove" aria-label="Usuń @q.Symbol z obserwowanych" title="Usuń z obserwowanych"
+                            @onclick="() => RemoveTickerAsync(q)" @onclick:stopPropagation="true">×</button>
+                }
                 <div class="quote-topline">
                     <div>
                         <span class="symbol-mark">@q.Symbol.Substring(0, 1)</span>
@@ -36,13 +121,20 @@
                     <span class="quote-time">@q.Time</span>
                 </div>
                 <div class="price-row">
-                    <span class="price">@q.Price.ToString("0.00")</span>
+                    <span class="price">@(q.HasPrice ? q.Price.ToString("0.00") : "—")</span>
                     <span class="currency">PLN</span>
                 </div>
                 <div class="quote-bottomline">
-                    <span class="change-arrow">@(q.Change >= 0 ? "▲" : "▼")</span>
-                    <span class="change">@((q.Change >= 0 ? "+" : "") + q.Change.ToString("0.00"))</span>
-                    <span class="change-label">dzisiaj</span>
+                    @if (q.HasPrice)
+                    {
+                        <span class="change-arrow">@(q.Change >= 0 ? "▲" : "▼")</span>
+                        <span class="change">@((q.Change >= 0 ? "+" : "") + q.Change.ToString("0.00"))</span>
+                        <span class="change-label">dzisiaj</span>
+                    }
+                    else
+                    {
+                        <span class="change-label">Pobieranie kursu...</span>
+                    }
                 </div>
                 <div class="quote-track"><span></span></div>
             </article>
@@ -50,56 +142,393 @@
     </div>
 </section>
 
+@if (selectedQuote is not null)
+{
+    <div class="dividend-backdrop" @onclick="CloseDividendModal">
+        <section class="dividend-modal" role="dialog" aria-modal="true" aria-labelledby="dividend-title" @onclick:stopPropagation="true">
+            <button class="modal-close" aria-label="Zamknij" @onclick="CloseDividendModal">×</button>
+            <p class="eyebrow">SZCZEGÓŁY SPÓŁKI</p>
+            <h2 id="dividend-title">@selectedQuote.Symbol</h2>
+            <div class="modal-price-row">
+                <span>Aktualna cena</span>
+                <strong>@selectedQuote.Price.ToString("0.00") PLN</strong>
+            </div>
+
+            @if (isLoadingDividend)
+            {
+                <p class="dividend-loading">Pobieram dane o dywidendzie...</p>
+            }
+            else if (!string.IsNullOrWhiteSpace(dividendError))
+            {
+                <p class="dividend-error" role="alert">@dividendError</p>
+            }
+            else if (selectedDividend?.AmountPlnPerShare is decimal grossDividend && selectedDividend.DividendYear is int dividendYear)
+            {
+                <div class="dividend-period @(selectedDividend.IsPreviousYear ? "previous-year" : "current-year")">
+                    @(selectedDividend.IsPreviousYear ? $"Brak ustalonej dywidendy na {selectedDividend.CurrentYear} r. — pokazano dane z poprzedniego roku" : $"Dywidenda ustalona na {selectedDividend.CurrentYear} r.")
+                </div>
+                <div class="dividend-facts">
+                    <div><span>Rok dywidendy</span><strong>@dividendYear</strong></div>
+                    <div><span>Dywidenda brutto / akcję</span><strong>@grossDividend.ToString("0.00") PLN</strong></div>
+                    @if (selectedDividend.ReferenceDate is DateTimeOffset referenceDate)
+                    {
+                        <div><span>@selectedDividend.ReferenceDateLabel</span><strong>@referenceDate.ToLocalTime().ToString("dd.MM.yyyy")</strong></div>
+                    }
+                    <div><span>Przyjęty podatek</span><strong>19%</strong></div>
+                </div>
+                @if (NetDividend is decimal netDividend && NetYield is decimal netYield)
+                {
+                    <div class="dividend-net-result">
+                        <span>Szacowana dywidenda netto / akcję</span>
+                        <strong>@netDividend.ToString("0.00") PLN</strong>
+                        <span class="net-yield">Stopa netto: @netYield.ToString("0.00")%</span>
+                    </div>
+                }
+                <p class="dividend-disclaimer">Stopa netto = dywidenda brutto ÷ aktualna cena × 100 × 0,81. Źródło: @selectedDividend.Source.</p>
+            }
+            else
+            {
+                <p class="dividend-empty">Brak danych o dywidendzie za @selectedDividend?.CurrentYear lub poprzedni rok.</p>
+            }
+        </section>
+    </div>
+}
+
 @code {
-    private HubConnection? hubConnection;
+    private static readonly string[] DefaultSymbols = ["ALE", "ALR", "BDX", "CDR", "DNP", "KGH", "KRU", "KTY", "LPP", "MBK", "OPL", "PGE", "PEO", "PKN", "PKO", "PZU", "SPL", "TPE", "XTB", "ACP"];
+    private static readonly HashSet<string> LiveSymbols = new(["PZU", "KETY", "RAINBOW", "PEAKO", "TEXT", "KRUK"], StringComparer.OrdinalIgnoreCase);
+
     private readonly List<Quote> quotes = new();
-    private readonly string[] symbols = new[] { "PZU", "KETY", "RAINBOW", "PEAKO", "TEXT", "KRUK" };
+    private readonly List<PortfolioResponse> portfolios = [];
+    private HubConnection? hubConnection;
+    private CancellationTokenSource? pollCancellation;
+    private Task? pollTask;
+    private Quote? selectedQuote;
+    private DividendResponse? selectedDividend;
     private bool isConnected;
+    private bool isAdding;
+    private bool isLoadingDividend;
+    private string tickerInput = string.Empty;
+    private string? addError;
+    private string? dividendError;
     private string lastUpdate = "--:--:--";
+    private bool showPortfolios;
+    private bool IsWig20Page => NavigationManager.Uri.EndsWith("/akcje/wig20", StringComparison.OrdinalIgnoreCase);
+
+    private decimal? NetDividend => selectedDividend?.AmountPlnPerShare is decimal amount
+        ? decimal.Round(amount * 0.81m, 2)
+        : null;
+
+    private decimal? NetYield => selectedQuote is { Price: > 0 } quote && selectedDividend?.AmountPlnPerShare is decimal amount
+        ? amount / quote.Price * 100m * 0.81m
+        : null;
 
     protected override async Task OnInitializedAsync()
     {
-        foreach (var s in symbols)
+        await AuthService.InitializeAsync();
+        if (AuthService.IsAuthenticated && !IsWig20Page)
         {
-            quotes.Add(new Quote { Symbol = s, Price = 0, Change = 0, Time = "--:--" });
+            var savedPortfolios = await HttpClient.GetFromJsonAsync<PortfolioResponse[]>("api/portfolios");
+            if (savedPortfolios is { Length: > 0 })
+            {
+                portfolios.AddRange(savedPortfolios);
+                showPortfolios = true;
+                return;
+            }
         }
 
+        var savedSymbols = AuthService.IsAuthenticated && !IsWig20Page
+            ? await HttpClient.GetFromJsonAsync<string[]>("api/watchlist")
+            : null;
+        var symbols = (AuthService.IsAuthenticated && !IsWig20Page && savedSymbols is { Length: > 0 } ? savedSymbols : DefaultSymbols)
+            .Select(symbol => symbol.Trim().ToUpperInvariant())
+            .Where(BankierMarketDataServiceSymbolIsValid)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        foreach (var symbol in symbols)
+        {
+            quotes.Add(new Quote { Symbol = symbol, Time = "--:--" });
+        }
+
+        await StartLiveConnectionAsync();
+        await RefreshCustomQuotesAsync(CancellationToken.None);
+
+        pollCancellation = new CancellationTokenSource();
+        pollTask = PollCustomQuotesAsync(pollCancellation.Token);
+    }
+
+    private static string FormatNumber(decimal value) =>
+        value.ToString("N2", CultureInfo.GetCultureInfo("pl-PL"));
+
+    private async Task StartLiveConnectionAsync()
+    {
         hubConnection = new HubConnectionBuilder()
-            .WithUrl(NavigationManager.ToAbsoluteUri("/markethub"))
+            .WithUrl(new Uri(HttpClient.BaseAddress!, "/markethub"))
             .WithAutomaticReconnect()
             .Build();
 
         hubConnection.On<string, decimal, decimal, string>("ReceiveQuote", (symbol, price, change, time) =>
         {
-            var q = quotes.FirstOrDefault(x => x.Symbol == symbol);
-            if (q != null)
+            var quote = quotes.FirstOrDefault(item => item.Symbol.Equals(symbol, StringComparison.OrdinalIgnoreCase));
+            if (quote is not null)
             {
-                q.Price = price;
-                q.Change = change;
-                q.Time = time;
+                quote.Price = price;
+                quote.Change = change;
+                quote.Time = time;
+                quote.HasPrice = true;
                 lastUpdate = time;
                 InvokeAsync(StateHasChanged);
             }
         });
 
+        hubConnection.Reconnecting += _ => SetConnectionStateAsync(false);
+        hubConnection.Reconnected += _ => SetConnectionStateAsync(true);
+        hubConnection.Closed += _ => SetConnectionStateAsync(false);
+
         try
         {
             await hubConnection.StartAsync();
             isConnected = true;
-            await InvokeAsync(StateHasChanged);
         }
-        catch
+        catch (HttpRequestException)
         {
             isConnected = false;
         }
     }
 
+    private Task SetConnectionStateAsync(bool connected)
+    {
+        return InvokeAsync(() =>
+        {
+            isConnected = connected;
+            StateHasChanged();
+        });
+    }
+
+    private async Task PollCustomQuotesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+            do
+            {
+                await RefreshCustomQuotesAsync(cancellationToken);
+            }
+            while (await timer.WaitForNextTickAsync(cancellationToken));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task RefreshCustomQuotesAsync(CancellationToken cancellationToken)
+    {
+        var customQuotes = quotes.Where(quote => !LiveSymbols.Contains(quote.Symbol)).ToArray();
+        await Task.WhenAll(customQuotes.Select(quote => RefreshQuoteAsync(quote, cancellationToken)));
+
+        if (customQuotes.Length > 0)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RefreshQuoteAsync(Quote quote, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await HttpClient.GetFromJsonAsync<MarketQuoteResponse>(
+                $"api/market/{Uri.EscapeDataString(quote.Symbol)}/quote",
+                cancellationToken);
+
+            if (result is not null)
+            {
+                quote.Price = result.PricePln;
+                quote.Change = result.Change;
+                quote.Time = result.UpdatedAt.ToLocalTime().ToString("HH:mm:ss");
+                quote.HasPrice = true;
+                lastUpdate = quote.Time;
+            }
+        }
+        catch (HttpRequestException)
+        {
+            quote.HasPrice = false;
+        }
+    }
+
+    private async Task AddTickerAsync()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            return;
+        }
+
+        var symbol = tickerInput.Trim().ToUpperInvariant();
+        addError = null;
+
+        if (string.IsNullOrWhiteSpace(symbol))
+        {
+            addError = "Wpisz symbol spółki.";
+            return;
+        }
+
+        if (quotes.Any(quote => quote.Symbol.Equals(symbol, StringComparison.OrdinalIgnoreCase)))
+        {
+            addError = "Ta spółka jest już obserwowana.";
+            return;
+        }
+
+        isAdding = true;
+        try
+        {
+            MarketQuoteResponse? result;
+            try
+            {
+                result = await HttpClient.GetFromJsonAsync<MarketQuoteResponse>(
+                    $"api/market/{Uri.EscapeDataString(symbol)}/quote");
+            }
+            catch (HttpRequestException)
+            {
+                addError = "Nie znaleziono notowań dla tego symbolu lub źródło jest chwilowo niedostępne.";
+                return;
+            }
+
+            if (result is null)
+            {
+                addError = "Nie znaleziono notowań dla tego symbolu.";
+                return;
+            }
+
+            var quote = new Quote
+            {
+                Symbol = result.Symbol,
+                Price = result.PricePln,
+                Change = result.Change,
+                Time = result.UpdatedAt.ToLocalTime().ToString("HH:mm:ss"),
+                HasPrice = true
+            };
+            quotes.Add(quote);
+            tickerInput = string.Empty;
+            try
+            {
+                await PersistWatchlistAsync();
+            }
+            catch (HttpRequestException)
+            {
+                quotes.Remove(quote);
+                tickerInput = symbol;
+                addError = "Nie udało się zapisać watchlisty. Zaloguj się ponownie i spróbuj jeszcze raz.";
+            }
+        }
+        finally
+        {
+            isAdding = false;
+        }
+    }
+
+    private async Task HandleTickerKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            await AddTickerAsync();
+        }
+    }
+
+    private async Task RemoveTickerAsync(Quote quote)
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            return;
+        }
+
+        var index = quotes.IndexOf(quote);
+        quotes.RemoveAt(index);
+        try
+        {
+            await PersistWatchlistAsync();
+        }
+        catch (HttpRequestException)
+        {
+            quotes.Insert(index, quote);
+            addError = "Nie udało się zapisać watchlisty. Zaloguj się ponownie i spróbuj jeszcze raz.";
+        }
+    }
+
+    private async Task PersistWatchlistAsync()
+    {
+        if (!AuthService.IsAuthenticated)
+        {
+            return;
+        }
+
+        var symbols = quotes.Select(quote => quote.Symbol).ToArray();
+        using var response = await HttpClient.PutAsJsonAsync("api/watchlist", new { Symbols = symbols });
+        response.EnsureSuccessStatusCode();
+    }
+
+    private async Task OpenDividendAsync(Quote quote)
+    {
+        selectedQuote = quote;
+        selectedDividend = null;
+        dividendError = null;
+        isLoadingDividend = true;
+
+        if (!quote.HasPrice)
+        {
+            await RefreshQuoteAsync(quote);
+        }
+
+        try
+        {
+            selectedDividend = await HttpClient.GetFromJsonAsync<DividendResponse>(
+                $"api/market/{Uri.EscapeDataString(quote.Symbol)}/dividend");
+        }
+        catch (HttpRequestException)
+        {
+            dividendError = "Nie udało się pobrać danych o dywidendzie. Spróbuj ponownie później.";
+        }
+        finally
+        {
+            isLoadingDividend = false;
+        }
+    }
+
+    private void CloseDividendModal()
+    {
+        selectedQuote = null;
+        selectedDividend = null;
+        dividendError = null;
+    }
+
+    private async Task HandleQuoteKeyDown(KeyboardEventArgs args, Quote quote)
+    {
+        if (args.Key is "Enter" or " ")
+        {
+            await OpenDividendAsync(quote);
+        }
+    }
+
+    private static bool BankierMarketDataServiceSymbolIsValid(string symbol) =>
+        !string.IsNullOrWhiteSpace(symbol) && symbol.Length <= 15 && symbol.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '-');
+
     public async ValueTask DisposeAsync()
     {
+        if (pollCancellation is not null)
+        {
+            await pollCancellation.CancelAsync();
+        }
+
+        if (pollTask is not null)
+        {
+            await pollTask;
+        }
+
         if (hubConnection is not null)
         {
             await hubConnection.DisposeAsync();
         }
+
+        pollCancellation?.Dispose();
     }
 
     private sealed class Quote
@@ -108,5 +537,28 @@
         public decimal Price { get; set; }
         public decimal Change { get; set; }
         public string Time { get; set; } = string.Empty;
+        public bool HasPrice { get; set; }
     }
+
+    private sealed record MarketQuoteResponse(string Symbol, decimal PricePln, decimal Change, DateTimeOffset UpdatedAt);
+
+    private sealed record DividendResponse(
+        string Symbol,
+        decimal? AmountPlnPerShare,
+        int CurrentYear,
+        int? DividendYear,
+        bool IsPreviousYear,
+        DateTimeOffset? ReferenceDate,
+        string? ReferenceDateLabel,
+        string Source);
+    private sealed record PortfolioResponse(int Id, string Name, IReadOnlyList<PortfolioPositionResponse> Positions);
+    private sealed record PortfolioPositionResponse(
+        string SecurityName,
+        string Exchange,
+        decimal AvailableQuantity,
+        decimal BlockedQuantity,
+        decimal Price,
+        string PriceCurrency,
+        decimal Value,
+        string ValueCurrency);
 }

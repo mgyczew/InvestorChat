@@ -1,27 +1,25 @@
 using System.Security.Claims;
-using InvestorChat.Server.Data;
-using InvestorChat.Server.Models;
+using InvestorChat.Application.Chat;
+using InvestorChat.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.EntityFrameworkCore;
 
 namespace InvestorChat.Server.Hubs;
 
 [Authorize]
 public class ChatHub : Hub
 {
-    private readonly AppDbContext _db;
+    private readonly IChatMessageService _messages;
 
-    public ChatHub(AppDbContext db)
+    public ChatHub(IChatMessageService messages)
     {
-        _db = db;
+        _messages = messages;
     }
 
     public async Task SendMessage(string text)
     {
         var userName = Context.User?.Identity?.Name ?? Context.User?.FindFirst("username")?.Value ?? "Anonymous";
         var trimmed = text?.Trim() ?? string.Empty;
-
         if (string.IsNullOrWhiteSpace(trimmed))
         {
             return;
@@ -34,18 +32,10 @@ public class ChatHub : Hub
             CreatedAt = DateTime.UtcNow
         };
 
-        _db.ChatMessages.Add(message);
-        await _db.SaveChangesAsync();
-
+        await _messages.AddAsync(message);
         await Clients.All.SendAsync("ReceiveMessage", userName, message.Content, message.CreatedAt.ToString("HH:mm:ss"));
     }
 
-    public async Task<List<ChatMessage>> GetRecentMessages()
-    {
-        return await _db.ChatMessages
-            .OrderByDescending(m => m.CreatedAt)
-            .Take(20)
-            .OrderBy(m => m.CreatedAt)
-            .ToListAsync();
-    }
+    public async Task<List<ChatMessage>> GetRecentMessages() =>
+        (await _messages.GetRecentAsync()).ToList();
 }

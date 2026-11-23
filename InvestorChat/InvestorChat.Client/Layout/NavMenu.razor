@@ -1,43 +1,69 @@
+@using Microsoft.AspNetCore.Components.Web
 @inject InvestorChat.Client.Services.AuthService AuthService
 @inject NavigationManager NavigationManager
 @implements IDisposable
 
-<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">ChatApp</a>
-    </div>
+<div class="top-row">
+    <a class="navbar-brand" href="">
+        InvestorChat
+    </a>
 </div>
 
 <div class="nav-scrollable">
-    <nav class="flex-column">
+    <nav class="flex-column" aria-label="Nawigacja główna">
+        <p class="nav-section-title">Główne</p>
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span aria-hidden="true"></span> Start
+                <span class="nav-icon" aria-hidden="true">⌂</span> Start
             </NavLink>
         </div>
-        @if (!AuthService.IsAuthenticated)
-        {
-            <div class="nav-item px-3">
-                <NavLink class="nav-link" href="login">
-                    <span aria-hidden="true"></span> Logowanie
-                </NavLink>
-            </div>
-        }
+        <p class="nav-section-title">Inwestowanie</p>
         <div class="nav-item px-3">
-            <NavLink class="nav-link" href="chat">
-                <span aria-hidden="true"></span> Czat
+            <NavLink class="nav-link" href="akcje" Match="NavLinkMatch.All">
+                <span class="nav-icon" aria-hidden="true">↗</span> Akcje
             </NavLink>
         </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="akcje">
-                <span aria-hidden="true"></span> Akcje
+        <div class="nav-item nav-subitem px-3">
+            <NavLink class="nav-link" href="akcje/wig20">
+                <span class="nav-icon" aria-hidden="true">▥</span> WIG20
+            </NavLink>
+        </div>
+        <div class="nav-item nav-subitem px-3">
+            <NavLink class="nav-link" href="akcje/podsumowanie">
+                <span class="nav-icon" aria-hidden="true">▤</span> Podsumowanie
             </NavLink>
         </div>
         @if (AuthService.IsAuthenticated)
         {
+            <div class="nav-item nav-subitem px-3">
+                <NavLink class="nav-link" href="portfele">
+                    <span class="nav-icon" aria-hidden="true">▥</span> Portfele
+                </NavLink>
+            </div>
+        }
+        <p class="nav-section-title">Społeczność</p>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="chat">
+                <span class="nav-icon" aria-hidden="true">◉</span> Czat
+            </NavLink>
+        </div>
+        <p class="nav-section-title">Konto</p>
+        @if (!AuthService.IsAuthenticated)
+        {
             <div class="nav-item px-3">
-                <button class="nav-link btn btn-link text-start" @onclick="Logout">
-                    Wyloguj (@AuthService.UserName)
+                <NavLink class="nav-link" href="login">
+                    <span class="nav-icon" aria-hidden="true">↪</span> Logowanie
+                </NavLink>
+            </div>
+        }
+
+        @if (AuthService.IsAuthenticated)
+        {
+            <div class="nav-item px-3">
+                <button class="nav-link nav-logout" @onclick="Logout">
+                    <span class="nav-icon" aria-hidden="true">⇥</span>
+                    <span>Wyloguj</span>
+                    <span class="user-name">@AuthService.UserName</span>
                 </button>
             </div>
         }
@@ -49,6 +75,11 @@
     {
         // Subscribe to auth state changes so the menu updates when user logs in/out
         AuthService.AuthStateChanged += OnAuthStateChanged;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AuthService.InitializeAsync();
     }
 
     private void OnAuthStateChanged()
@@ -67,9 +98,9 @@
         });
     }
 
-    private void Logout()
+    private async Task Logout()
     {
-        AuthService.Logout();
+        await AuthService.LogoutAsync();
         NavigationManager.NavigateTo("/login");
     }
 

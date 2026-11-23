@@ -1,20 +1,26 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Microsoft.JSInterop;
 
 namespace InvestorChat.Client.Services;
 
 public class AuthService
 {
     private readonly HttpClient _http;
+    private readonly IJSRuntime _jsRuntime;
+    private const string StorageKey = "investorchat.auth";
+    private bool _initialized;
 
-    public AuthService(HttpClient http)
+    public AuthService(HttpClient http, IJSRuntime jsRuntime)
     {
         _http = http;
+        _jsRuntime = jsRuntime;
     }
 
     public string? Token { get; private set; }
     public string? UserName { get; private set; }
-    public bool IsAuthenticated => !string.IsNullOrWhiteSpace(Token);
+    public DateTimeOffset? TokenExpiresAtUtc { get; private set; }
+    public bool IsAuthenticated => !string.IsNullOrWhiteSpace(Token) && TokenExpiresAtUtc > DateTimeOffset.UtcNow;
 
     public async Task<AuthResult> LoginAsync(string username, string password)
     {
@@ -35,7 +41,7 @@ public class AuthService
             throw new InvalidOperationException(result.Message);
         }
 
-        ApplyToken(result.Token!, result.UserName!);
+        await ApplyTokenAsync(result.Token!, result.UserName!, result.ExpiresAtUtc ?? throw new InvalidOperationException("Brak czasu wygaśnięcia tokenu."));
         return result;
     }
 
@@ -59,21 +65,64 @@ public class AuthService
             throw new InvalidOperationException(result.Message);
         }
 
-        ApplyToken(result.Token!, result.UserName!);
+        await ApplyTokenAsync(result.Token!, result.UserName!, result.ExpiresAtUtc ?? throw new InvalidOperationException("Brak czasu wygaśnięcia tokenu."));
         return result;
     }
 
-    public void Logout()
+    public async Task LogoutAsync()
     {
-        ApplyToken(null, null);
+        await _jsRuntime.InvokeVoidAsync("sessionStorage.removeItem", StorageKey);
+        SetToken(null, null, null);
     }
 
     public event Action? AuthStateChanged;
 
-    private void ApplyToken(string? token, string? userName)
+    public async Task InitializeAsync()
+    {
+        if (_initialized)
+        {
+            return;
+        }
+
+        try
+        {
+            var storedValue = await _jsRuntime.InvokeAsync<string?>("sessionStorage.getItem", StorageKey);
+            var stored = string.IsNullOrWhiteSpace(storedValue)
+                ? null
+                : System.Text.Json.JsonSerializer.Deserialize<StoredAuth>(storedValue);
+            if (stored is not null && !string.IsNullOrWhiteSpace(stored.Token) && !string.IsNullOrWhiteSpace(stored.UserName) && stored.ExpiresAtUtc > DateTimeOffset.UtcNow)
+            {
+                SetToken(stored.Token, stored.UserName, stored.ExpiresAtUtc);
+            }
+            else if (stored is not null)
+            {
+                await _jsRuntime.InvokeVoidAsync("sessionStorage.removeItem", StorageKey);
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            await _jsRuntime.InvokeVoidAsync("sessionStorage.removeItem", StorageKey);
+        }
+        catch (JSException)
+        {
+        }
+        finally
+        {
+            _initialized = true;
+        }
+    }
+
+    private async Task ApplyTokenAsync(string token, string userName, DateTimeOffset expiresAtUtc)
+    {
+        await _jsRuntime.InvokeVoidAsync("sessionStorage.setItem", StorageKey, System.Text.Json.JsonSerializer.Serialize(new StoredAuth(token, userName, expiresAtUtc)));
+        SetToken(token, userName, expiresAtUtc);
+    }
+
+    private void SetToken(string? token, string? userName, DateTimeOffset? expiresAtUtc)
     {
         Token = token;
         UserName = userName;
+        TokenExpiresAtUtc = expiresAtUtc;
 
         if (string.IsNullOrWhiteSpace(token))
         {
@@ -96,6 +145,8 @@ public class AuthService
             // If you need to log these, inject ILogger<AuthService> and log here.
         }
     }
+
+    private sealed record StoredAuth(string Token, string UserName, DateTimeOffset ExpiresAtUtc);
 }
 
 
@@ -124,4 +175,5 @@ public class AuthResult
     public string Message { get; set; } = string.Empty;
     public string? Token { get; set; }
     public string? UserName { get; set; }
+    public DateTimeOffset? ExpiresAtUtc { get; set; }
 }

@@ -19,6 +19,7 @@ TestResults/
 *.db-wal
 
 # Local configuration and secrets
+.env
 appsettings.Local.json
 appsettings.*.local.json
 

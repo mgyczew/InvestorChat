@@ -3,7 +3,55 @@
 
 <PageTitle>InvestorChat</PageTitle>
 
-<div class="text-center py-5">
-    <h1>InvestorChat</h1>
-    <p class="lead">Wybierz funkcję z menu po lewej stronie.</p>
-</div>
+<section class="home-dashboard">
+    <section class="home-hero">
+        <div class="hero-copy">
+            <p class="home-eyebrow">INVESTORCHAT</p>
+            <h1>Inwestuj<br /><span>z kontekstem.</span></h1>
+            <p class="hero-description">Notowania GPW i rozmowy inwestorów — w jednym miejscu.</p>
+            <div class="hero-actions">
+                <NavLink class="home-primary-link" href="akcje">Zobacz notowania <span aria-hidden="true">→</span></NavLink>
+                <NavLink class="home-secondary-link" href="chat">Przejdź do czatu</NavLink>
+            </div>
+        </div>
+        <div class="hero-visual">
+            <div class="market-preview">
+                <div class="preview-heading">
+                    <span>TWÓJ PULPIT</span>
+                    <span class="preview-status"><span class="preview-status-dot"></span> ONLINE</span>
+                </div>
+                <NavLink class="preview-row" href="akcje">
+                    <span class="preview-icon market-icon" aria-hidden="true">↗</span>
+                    <span class="preview-copy"><strong>Notowania</strong><small>Spółki GPW na żywo</small></span>
+                    <span class="preview-arrow" aria-hidden="true">→</span>
+                </NavLink>
+                <NavLink class="preview-row" href="chat">
+                    <span class="preview-icon chat-icon" aria-hidden="true">◉</span>
+                    <span class="preview-copy"><strong>Społeczność</strong><small>Rozmowy inwestorów</small></span>
+                    <span class="preview-arrow" aria-hidden="true">→</span>
+                </NavLink>
+            </div>
+        </div>
+    </section>
+
+    <section class="home-features" aria-label="Funkcje InvestorChat">
+        <NavLink class="feature-card" href="akcje">
+            <span class="feature-icon market-icon" aria-hidden="true">↗</span>
+            <span class="feature-title">Notowania na żywo</span>
+            <span class="feature-description">Obserwuj ceny i dzienne zmiany wybranych spółek.</span>
+            <span class="feature-link">Otwórz rynek <span aria-hidden="true">→</span></span>
+        </NavLink>
+        <NavLink class="feature-card" href="chat">
+            <span class="feature-icon chat-icon" aria-hidden="true">◉</span>
+            <span class="feature-title">Czat inwestorów</span>
+            <span class="feature-description">Dołącz do rozmowy i poznaj perspektywę społeczności.</span>
+            <span class="feature-link">Dołącz do rozmowy <span aria-hidden="true">→</span></span>
+        </NavLink>
+        <NavLink class="feature-card" href="login">
+            <span class="feature-icon account-icon" aria-hidden="true">＋</span>
+            <span class="feature-title">Twoje konto</span>
+            <span class="feature-description">Zaloguj się lub utwórz konto, aby korzystać z czatu.</span>
+            <span class="feature-link">Logowanie i rejestracja <span aria-hidden="true">→</span></span>
+        </NavLink>
+    </section>
+</section>

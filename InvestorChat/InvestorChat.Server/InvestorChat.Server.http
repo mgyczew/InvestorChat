@@ -1,6 +1,13 @@
 @InvestorChat.Server_HostAddress = http://localhost:5207
 
-GET {{InvestorChat.Server_HostAddress}}/weatherforecast/
+### Kurs spółki GPW
+GET {{InvestorChat.Server_HostAddress}}/api/market/PZU/quote
 Accept: application/json
 
-###
+### Dywidenda za bieżący lub poprzedni rok
+GET {{InvestorChat.Server_HostAddress}}/api/market/PZU/dividend
+Accept: application/json
+
+### Nieprawidłowy symbol
+GET {{InvestorChat.Server_HostAddress}}/api/market/INVALID%20TICKER/quote
+Accept: application/json

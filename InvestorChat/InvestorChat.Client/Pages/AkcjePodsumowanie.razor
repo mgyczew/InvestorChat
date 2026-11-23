@@ -1,0 +1,423 @@
+@page "/akcje/podsumowanie"
+@using System.Net.Http.Json
+@using System.Globalization
+@using System.Text
+@inject HttpClient HttpClient
+@inject InvestorChat.Client.Services.AuthService AuthService
+
+<PageTitle>Podsumowanie akcji</PageTitle>
+
+<section class="market-dashboard">
+    <header class="market-header">
+        <div>
+            <p class="eyebrow">RYNEK WARSZAWSKI</p>
+            <h1>Podsumowanie akcji</h1>
+            <p class="market-subtitle">Kursy i szacowane dywidendy netto dla obserwowanych spółek.</p>
+        </div>
+        <NavLink class="primary-button" href="/akcje">Lista spółek</NavLink>
+    </header>
+
+    @if (isLoading)
+    {
+        <p class="dividend-loading">Pobieram kursy i dane o dywidendach…</p>
+    }
+    else
+    {
+        @if (!string.IsNullOrWhiteSpace(errorMessage))
+        {
+            <p class="dividend-error" role="alert">@errorMessage</p>
+        }
+        @if (!string.IsNullOrWhiteSpace(portfolioError))
+        {
+            <p class="dividend-error" role="alert">@portfolioError</p>
+        }
+        @if (!string.IsNullOrWhiteSpace(unresolvedPortfolioPositions))
+        {
+            <p class="dividend-error" role="status">Nie udało się dopasować tickerów do tych pozycji portfela: @unresolvedPortfolioPositions. Dodaj ticker w nazwie pozycji lub użyj watchlisty.</p>
+        }
+        @if (rows.Count == 0)
+        {
+            <p class="dividend-empty">@(AuthService.IsAuthenticated && portfolios.Count > 0 ? "Nie znaleziono tickerów w pozycjach portfela." : "Brak spółek na liście.")</p>
+        }
+        else
+        {
+            <div class="summary-table-wrap">
+                <table class="summary-table">
+                <thead>
+                    <tr>
+                        <th aria-sort="@GetAriaSort(nameof(SummaryRow.Symbol))"><button class="summary-sort-button" @onclick="() => SortBy(nameof(SummaryRow.Symbol))">Spółka <span>@GetSortIndicator(nameof(SummaryRow.Symbol))</span></button></th>
+                        <th aria-sort="@GetAriaSort(nameof(SummaryRow.Price))"><button class="summary-sort-button" @onclick="() => SortBy(nameof(SummaryRow.Price))">Kurs <span>@GetSortIndicator(nameof(SummaryRow.Price))</span></button></th>
+                        <th aria-sort="@GetAriaSort(nameof(SummaryRow.Change))"><button class="summary-sort-button" @onclick="() => SortBy(nameof(SummaryRow.Change))">Zmiana <span>@GetSortIndicator(nameof(SummaryRow.Change))</span></button></th>
+                        <th aria-sort="@GetAriaSort(nameof(SummaryRow.GrossDividend))"><button class="summary-sort-button" @onclick="() => SortBy(nameof(SummaryRow.GrossDividend))">Dywidenda brutto / akcję <span>@GetSortIndicator(nameof(SummaryRow.GrossDividend))</span></button></th>
+                        <th aria-sort="@GetAriaSort(nameof(SummaryRow.NetDividend))"><button class="summary-sort-button" title="Kwota po odjęciu 19% podatku, w przeliczeniu na jedną akcję" @onclick="() => SortBy(nameof(SummaryRow.NetDividend))">Dywidenda netto / akcję <span>@GetSortIndicator(nameof(SummaryRow.NetDividend))</span></button></th>
+                        <th aria-sort="@GetAriaSort(nameof(SummaryRow.NetIncomeAmount))"><button class="summary-sort-button" @onclick="() => SortBy(nameof(SummaryRow.NetIncomeAmount))">Zysk netto spółki <span>@GetSortIndicator(nameof(SummaryRow.NetIncomeAmount))</span></button></th>
+                        <th aria-sort="@GetAriaSort(nameof(SummaryRow.NetIncomeChange))"><button class="summary-sort-button" @onclick="() => SortBy(nameof(SummaryRow.NetIncomeChange))">Zmiana zysku r/r <span>@GetSortIndicator(nameof(SummaryRow.NetIncomeChange))</span></button></th>
+                        <th aria-sort="@GetAriaSort(nameof(SummaryRow.NetYield))"><button class="summary-sort-button" @onclick="() => SortBy(nameof(SummaryRow.NetYield))">Stopa netto <span>@GetSortIndicator(nameof(SummaryRow.NetYield))</span></button></th>
+                        <th aria-sort="@GetAriaSort(nameof(SummaryRow.DividendYear))"><button class="summary-sort-button" @onclick="() => SortBy(nameof(SummaryRow.DividendYear))">Rok danych <span>@GetSortIndicator(nameof(SummaryRow.DividendYear))</span></button></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in SortedRows)
+                    {
+                        <tr>
+                            <th scope="row">@row.Symbol</th>
+                            <td>@(row.Price is decimal price ? $"{price:0.00} PLN" : "—")</td>
+                            <td class="@(row.Change is decimal change && change < 0 ? "summary-negative" : "summary-positive")">@(row.Change is decimal changeValue ? $"{changeValue:+0.00;-0.00;0.00}" : "—")</td>
+                            <td>@(row.GrossDividend is decimal gross ? $"{gross:0.00} PLN" : "Brak danych")</td>
+                            <td>@(row.NetDividend is decimal net ? $"{net:0.00} PLN" : "—")</td>
+                            <td>
+                                @if (row.LatestNetIncome is { } latestIncome)
+                                {
+                                    <button class="summary-net-income-toggle"
+                                            aria-expanded="@(expandedSymbol == row.Symbol)"
+                                            title="Kliknij, aby zobaczyć historię do pięciu lat"
+                                            @onclick="() => ToggleNetIncomeHistory(row.Symbol)">
+                                        @FormatCurrency(latestIncome.Amount, latestIncome.Currency) (@latestIncome.FiscalYear)
+                                    </button>
+                                }
+                                else
+                                {
+                                    <span>@(row.NetIncomeUnavailable ? "Dane niedostępne" : "Brak danych")</span>
+                                }
+                            </td>
+                            <td class="@(row.NetIncomeChange is decimal netIncomeChange && netIncomeChange < 0 ? "summary-negative" : "summary-positive")">
+                                @(row.NetIncomeChange is decimal incomeDifference && row.LatestNetIncome is { } income
+                                    ? FormatSignedCurrency(incomeDifference, income.Currency)
+                                    : "—")
+                            </td>
+                            <td>@(row.NetYield is decimal yield ? $"{yield:0.00}%" : "—")</td>
+                            <td>@(row.DividendYear?.ToString() ?? "—")</td>
+                        </tr>
+                        @if (expandedSymbol == row.Symbol)
+                        {
+                            <tr class="net-income-history-row">
+                                <td colspan="9">
+                                    <div class="net-income-history">
+                                        <strong>Historia rocznego zysku netto — @row.Symbol</strong>
+                                        @if (row.NetIncomeHistory?.Years is { Count: > 0 } years)
+                                        {
+                                            <div class="net-income-history-list">
+                                                @foreach (var year in years)
+                                                {
+                                                    <div class="net-income-year">
+                                                        <span>@year.FiscalYear</span>
+                                                        <strong>@FormatCurrency(year.Amount, year.Currency)</strong>
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                        else if (row.NetIncomeUnavailable)
+                                        {
+                                            <p class="dividend-error">Nie udało się pobrać historii zysku netto.</p>
+                                        }
+                                        else
+                                        {
+                                            <p class="dividend-empty">Brak dostępnych rocznych raportów finansowych.</p>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+                </table>
+            </div>
+            <p class="dividend-disclaimer">Stopa netto = dywidenda brutto ÷ aktualny kurs × 100 × 0,81. Wartości są szacunkowe i zależą od dostępności danych źródłowych.</p>
+        }
+
+    }
+</section>
+
+@code {
+    private static readonly string[] DefaultSymbols = ["ALE", "ALR", "BDX", "CDR", "DNP", "KGH", "KRU", "KTY", "LPP", "MBK", "OPL", "PGE", "PEO", "PKN", "PKO", "PZU", "SPL", "TPE", "XTB", "ACP"];
+    private static readonly IReadOnlyDictionary<string, string> PortfolioSymbolAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["ASSECO POLAND"] = "ACP",
+        ["ASSECO POLAND S.A."] = "ACP",
+        ["ASSECO POLAND SA"] = "ACP",
+        ["ASSECO BS"] = "ASSECOBS",
+        ["ASSECO BUSINESS SOLUTIONS"] = "ASSECOBS",
+        ["BANK POLSKA KASA OPIEKI"] = "PEO",
+        ["BANK PEKAO"] = "PEO",
+        ["BANK PEKAO S.A."] = "PEO",
+        ["CD PROJEKT"] = "CDR",
+        ["CD PROJEKT S.A."] = "CDR",
+        ["CD PROJEKT SA"] = "CDR",
+        ["DINO POLSKA"] = "DNP",
+        ["DINO POLSKA S.A."] = "DNP",
+        ["KGHM POLSKA MIEDZ"] = "KGH",
+        ["KGHM POLSKA MIEDZ S.A."] = "KGH",
+        ["KRUK S.A."] = "KRU",
+        ["KRUK SA"] = "KRU",
+        ["LPP S.A."] = "LPP",
+        ["LPP SA"] = "LPP",
+        ["ORLEN"] = "PKN",
+        ["ORLEN S.A."] = "PKN",
+        ["PKN ORLEN"] = "PKN",
+        ["PKN ORLEN S.A."] = "PKN",
+        ["POWSZECHNA KASA OSZCZEDNOSCI BANK POLSKI"] = "PKO",
+        ["PKO BANK POLSKI"] = "PKO",
+        ["PKO BP"] = "PKO",
+        ["POWSZECHNY ZAKLAD UBEZPIECZEN"] = "PZU",
+        ["PZU S.A."] = "PZU",
+        ["TAURON POLSKA ENERGIA"] = "TPE",
+        ["TAURON POLSKA ENERGIA S.A."] = "TPE",
+        ["X-TRADE BROKERS"] = "XTB",
+        ["XTB S.A."] = "XTB"
+    };
+    private readonly List<SummaryRow> rows = [];
+    private readonly List<PortfolioResponse> portfolios = [];
+    private bool isLoading = true;
+    private string? errorMessage;
+    private string? portfolioError;
+    private string? unresolvedPortfolioPositions;
+    private string sortColumn = nameof(SummaryRow.Symbol);
+    private bool sortAscending = true;
+    private string? expandedSymbol;
+
+    private IEnumerable<SummaryRow> SortedRows => sortColumn switch
+    {
+        nameof(SummaryRow.Price) => SortRows(row => row.Price),
+        nameof(SummaryRow.Change) => SortRows(row => row.Change),
+        nameof(SummaryRow.GrossDividend) => SortRows(row => row.GrossDividend),
+        nameof(SummaryRow.NetDividend) => SortRows(row => row.NetDividend),
+        nameof(SummaryRow.NetIncomeAmount) => SortRows(row => row.NetIncomeAmount),
+        nameof(SummaryRow.NetIncomeChange) => SortRows(row => row.NetIncomeChange),
+        nameof(SummaryRow.NetYield) => SortRows(row => row.NetYield),
+        nameof(SummaryRow.DividendYear) => SortRows(row => row.DividendYear),
+        _ => SortRows(row => row.Symbol)
+    };
+
+    private IOrderedEnumerable<SummaryRow> SortRows<TKey>(Func<SummaryRow, TKey> keySelector) =>
+        sortAscending
+            ? rows.OrderBy(keySelector)
+            : rows.OrderByDescending(keySelector);
+
+    private void SortBy(string column)
+    {
+        if (sortColumn == column)
+        {
+            sortAscending = !sortAscending;
+            return;
+        }
+
+        sortColumn = column;
+        sortAscending = true;
+    }
+
+    private string GetAriaSort(string column) => sortColumn == column
+        ? sortAscending ? "ascending" : "descending"
+        : "none";
+
+    private string GetSortIndicator(string column) => sortColumn == column
+        ? sortAscending ? "↑" : "↓"
+        : "↕";
+
+    private void ToggleNetIncomeHistory(string symbol) =>
+        expandedSymbol = expandedSymbol == symbol ? null : symbol;
+
+    private static string FormatCurrency(decimal amount, string currency) =>
+        $"{amount.ToString("N0", CultureInfo.GetCultureInfo("pl-PL"))} {currency}";
+
+    private static string FormatSignedCurrency(decimal amount, string currency) =>
+        $"{(amount > 0 ? "+" : string.Empty)}{FormatCurrency(amount, currency)}";
+
+    private static string? ResolvePortfolioSymbol(string securityName)
+    {
+        var normalized = NormalizeSecurityName(securityName);
+        if (PortfolioSymbolAliases.TryGetValue(normalized, out var symbol))
+        {
+            return symbol;
+        }
+
+        var ticker = normalized.Replace(" ", string.Empty, StringComparison.Ordinal);
+        return ticker.Length is > 0 and <= 15 && ticker.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '-')
+            ? ticker
+            : null;
+    }
+
+    private static string NormalizeSecurityName(string securityName)
+    {
+        var normalized = securityName.Trim().ToUpperInvariant().Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(normalized.Length);
+        foreach (var character in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
+            {
+                builder.Append(char.IsWhiteSpace(character) ? ' ' : character);
+            }
+        }
+
+        return string.Join(' ', builder.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AuthService.InitializeAsync();
+        if (AuthService.IsAuthenticated)
+        {
+            try
+            {
+                var savedPortfolios = await HttpClient.GetFromJsonAsync<PortfolioResponse[]>("api/portfolios");
+                if (savedPortfolios is not null)
+                {
+                    portfolios.AddRange(savedPortfolios);
+                }
+            }
+            catch (HttpRequestException)
+            {
+                portfolioError = "Nie udało się pobrać portfeli. Sprawdź połączenie z serwerem i spróbuj ponownie.";
+            }
+        }
+
+        try
+        {
+            string[] symbols;
+            if (AuthService.IsAuthenticated && portfolios.Count > 0)
+            {
+                var resolvedSymbols = portfolios
+                    .SelectMany(portfolio => portfolio.Positions)
+                    .Select(position => (Position: position, Symbol: ResolvePortfolioSymbol(position.SecurityName)))
+                    .ToArray();
+                symbols = resolvedSymbols
+                    .Where(item => item.Symbol is not null)
+                    .Select(item => item.Symbol!)
+                    .ToArray();
+                var unresolvedNames = resolvedSymbols
+                    .Where(item => item.Symbol is null)
+                    .Select(item => item.Position.SecurityName)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                if (unresolvedNames.Length > 0)
+                {
+                    unresolvedPortfolioPositions = string.Join(", ", unresolvedNames);
+                }
+            }
+            else if (AuthService.IsAuthenticated)
+            {
+                var savedSymbols = await HttpClient.GetFromJsonAsync<string[]>("api/watchlist");
+                symbols = savedSymbols is { Length: > 0 } ? savedSymbols : DefaultSymbols;
+            }
+            else
+            {
+                symbols = DefaultSymbols;
+            }
+
+            symbols = symbols
+                .Select(symbol => symbol.Trim().ToUpperInvariant())
+                .Where(symbol => !string.IsNullOrWhiteSpace(symbol))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            rows.AddRange(symbols.Select(symbol => new SummaryRow { Symbol = symbol }));
+            using var concurrency = new SemaphoreSlim(4);
+            await Task.WhenAll(rows.Select(async row =>
+            {
+                await concurrency.WaitAsync();
+                try
+                {
+                    await LoadRowAsync(row);
+                }
+                finally
+                {
+                    concurrency.Release();
+                }
+            }));
+        }
+        catch (HttpRequestException)
+        {
+            errorMessage = "Nie udało się pobrać listy spółek. Sprawdź połączenie z serwerem i spróbuj ponownie.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadRowAsync(SummaryRow row)
+    {
+        await Task.WhenAll(LoadQuoteAsync(row), LoadDividendAsync(row), LoadNetIncomeAsync(row));
+    }
+
+    private async Task LoadQuoteAsync(SummaryRow row)
+    {
+        try
+        {
+            var quote = await HttpClient.GetFromJsonAsync<MarketQuoteResponse>($"api/market/{Uri.EscapeDataString(row.Symbol)}/quote");
+            if (quote is not null)
+            {
+                row.Price = quote.PricePln;
+                row.Change = quote.Change;
+            }
+        }
+        catch (HttpRequestException)
+        {
+        }
+    }
+
+    private async Task LoadDividendAsync(SummaryRow row)
+    {
+        try
+        {
+            var dividend = await HttpClient.GetFromJsonAsync<DividendResponse>($"api/market/{Uri.EscapeDataString(row.Symbol)}/dividend");
+            row.GrossDividend = dividend?.AmountPlnPerShare;
+            row.DividendYear = dividend?.DividendYear;
+            if (row.GrossDividend is decimal gross)
+            {
+                row.NetDividend = decimal.Round(gross * 0.81m, 2);
+                if (row.Price is > 0)
+                {
+                    row.NetYield = gross / row.Price.Value * 100m * 0.81m;
+                }
+            }
+        }
+        catch (HttpRequestException)
+        {
+        }
+    }
+
+    private async Task LoadNetIncomeAsync(SummaryRow row)
+    {
+        try
+        {
+            row.NetIncomeHistory = await HttpClient.GetFromJsonAsync<NetIncomeHistoryResponse>(
+                $"api/market/{Uri.EscapeDataString(row.Symbol)}/net-income");
+        }
+        catch (HttpRequestException)
+        {
+            row.NetIncomeUnavailable = true;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            row.NetIncomeUnavailable = true;
+        }
+    }
+
+    private sealed class SummaryRow
+    {
+        public string Symbol { get; set; } = string.Empty;
+        public decimal? Price { get; set; }
+        public decimal? Change { get; set; }
+        public decimal? GrossDividend { get; set; }
+        public decimal? NetDividend { get; set; }
+        public decimal? NetYield { get; set; }
+        public int? DividendYear { get; set; }
+        public NetIncomeHistoryResponse? NetIncomeHistory { get; set; }
+        public bool NetIncomeUnavailable { get; set; }
+        public NetIncomeYearResponse? LatestNetIncome => NetIncomeHistory?.Years.FirstOrDefault();
+        public NetIncomeYearResponse? PreviousNetIncome => NetIncomeHistory?.Years.Skip(1).FirstOrDefault();
+        public decimal? NetIncomeAmount => LatestNetIncome?.Amount;
+        public decimal? NetIncomeChange => LatestNetIncome is { } latest &&
+            PreviousNetIncome is { } previous &&
+            latest.Currency == previous.Currency
+                ? latest.Amount - previous.Amount
+                : null;
+    }
+
+    private sealed record MarketQuoteResponse(string Symbol, decimal PricePln, decimal Change, DateTimeOffset UpdatedAt);
+    private sealed record DividendResponse(string Symbol, decimal? AmountPlnPerShare, int CurrentYear, int? DividendYear, bool IsPreviousYear, DateTimeOffset? ReferenceDate, string? ReferenceDateLabel, string Source);
+    private sealed record NetIncomeHistoryResponse(string Symbol, IReadOnlyList<NetIncomeYearResponse> Years);
+    private sealed record NetIncomeYearResponse(int FiscalYear, decimal Amount, string Currency);
+    private sealed record PortfolioResponse(int Id, string Name, IReadOnlyList<PortfolioPositionResponse> Positions);
+    private sealed record PortfolioPositionResponse(string SecurityName);
+}

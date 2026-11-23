@@ -2,10 +2,11 @@
 @using Microsoft.AspNetCore.SignalR.Client
 @using Microsoft.AspNetCore.Components.Web
 @inject InvestorChat.Client.Services.AuthService AuthService
+@inject HttpClient HttpClient
 @inject NavigationManager NavigationManager
 @implements IAsyncDisposable
 
-<title>Czat</title>
+<PageTitle>Czat</PageTitle>
 
 @if (!AuthService.IsAuthenticated)
 {
@@ -23,7 +24,7 @@ else
             <span class="status-badge @(IsConnected ? "connected" : "disconnected")">@connectionStatus</span>
         </div>
 
-        <div class="messages">
+        <div class="messages" aria-live="polite" aria-relevant="additions">
             @if (messages.Count == 0)
             {
                 <p class="empty-state">Brak wiadomości. Bądź pierwszy i napisz coś!</p>
@@ -44,7 +45,7 @@ else
         </div>
 
         <div class="composer">
-<input @bind="messageInput" @onkeydown="HandleKeyDown" />
+            <input @bind="messageInput" @bind:event="oninput" @onkeydown="HandleKeyDown" placeholder="Napisz wiadomość..." aria-label="Treść wiadomości" maxlength="2000" />
             <button class="primary-button" @onclick="SendMessageAsync" disabled="@(!IsConnected)">Wyślij</button>
         </div>
     </div>
@@ -60,6 +61,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        await AuthService.InitializeAsync();
         if (!AuthService.IsAuthenticated)
         {
             NavigationManager.NavigateTo("/login");
@@ -67,7 +69,7 @@ else
         }
 
         hubConnection = new HubConnectionBuilder()
-            .WithUrl(NavigationManager.ToAbsoluteUri("/chathub"), options =>
+            .WithUrl(new Uri(HttpClient.BaseAddress!, "/chathub"), options =>
             {
                 options.AccessTokenProvider = () => Task.FromResult<string?>(AuthService.Token);
             })
@@ -80,14 +82,18 @@ else
             InvokeAsync(StateHasChanged);
         });
 
+        hubConnection.Reconnecting += _ => UpdateConnectionStatusAsync("Ponowne łączenie...");
+        hubConnection.Reconnected += _ => UpdateConnectionStatusAsync("Połączono");
+        hubConnection.Closed += _ => UpdateConnectionStatusAsync("Rozłączono");
+
         try
         {
             await hubConnection.StartAsync();
             connectionStatus = "Połączono";
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            connectionStatus = $"Błąd: {ex.Message}";
+            connectionStatus = "Nie udało się połączyć";
         }
 
         await InvokeAsync(StateHasChanged);
@@ -111,11 +117,20 @@ else
             await hubConnection.SendAsync("SendMessage", text);
             messageInput = string.Empty;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            connectionStatus = $"Błąd wysyłania: {ex.Message}";
+            connectionStatus = "Nie udało się wysłać wiadomości";
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    private Task UpdateConnectionStatusAsync(string status)
+    {
+        return InvokeAsync(() =>
+        {
+            connectionStatus = status;
+            StateHasChanged();
+        });
     }
 
     private async Task HandleKeyDown(KeyboardEventArgs args)

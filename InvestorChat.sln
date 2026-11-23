@@ -1,0 +1,14 @@
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InvestorChat.Client", "InvestorChat.Client\InvestorChat.Client.csproj", "{2D7E0223-A3D8-4470-8A00-EDEB3A2BF53A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InvestorChat.Domain", "InvestorChat.Domain\InvestorChat.Domain.csproj", "{A8C6D92D-C08D-4D0A-9D66-64AEF94540C7}"
+EndProject
+Global
+// ...existing code...
+		{79C6024A-6EE9-4758-AA96-7A0F71857196}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{79C6024A-6EE9-4758-AA96-7A0F71857196}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A8C6D92D-C08D-4D0A-9D66-64AEF94540C7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A8C6D92D-C08D-4D0A-9D66-64AEF94540C7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A8C6D92D-C08D-4D0A-9D66-64AEF94540C7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A8C6D92D-C08D-4D0A-9D66-64AEF94540C7}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+// ...existing code...

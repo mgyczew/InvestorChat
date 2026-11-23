@@ -1,4 +1,4 @@
-namespace InvestorChat.Server.Models;
+namespace InvestorChat.Domain.Entities;
 
 public class ChatMessage
 {
